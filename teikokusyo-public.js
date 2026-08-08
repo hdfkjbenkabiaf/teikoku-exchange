@@ -54,7 +54,17 @@ const BASE_STOCK_LIST = [
   { id:"TCHM", name:"帝国化学工業",           basePrice:28200, sector:"製造",      tier:"medium" },
   { id:"TZAI", name:"紅茶帝国財閥コングロマリット",basePrice:100000,sector:"金融", tier:"large"  },
   { id:"TGAF", name:"帝国宇宙開発機構",       basePrice:89100, sector:"テック",    tier:"large"  },
-  { id:"TWLD", name:"世界紅茶物流帝国",       basePrice:78200, sector:"交通",      tier:"large"  }
+  { id:"TWLD", name:"世界紅茶物流帝国",       basePrice:78200, sector:"交通",      tier:"large"  },
+  { id:"TSBX", name:"茶星バックス",           basePrice:6600,  sector:"食料",      tier:"small"  },
+  { id:"TGOK", name:"緑旭飲料",               basePrice:5400,  sector:"食料",      tier:"small"  },
+  { id:"TMCD", name:"紅ドナルド",             basePrice:19000, sector:"食料",      tier:"medium" },
+  { id:"TNEK", name:"紅猫運輸",               basePrice:15800, sector:"交通",      tier:"medium" },
+  { id:"TKEN", name:"紅東建設",               basePrice:13900, sector:"建設",      tier:"medium" },
+  { id:"TSEI", name:"紅帝製菓",               basePrice:4800,  sector:"食料",      tier:"small"  },
+  { id:"TBKG", name:"バーガー紅王",           basePrice:7200,  sector:"食料",      tier:"small"  },
+  { id:"TSVN", name:"7紅フードフォールディング",basePrice:62400, sector:"流通",     tier:"large"  },
+  { id:"TFMT", name:"家族の紅マート",         basePrice:31700, sector:"流通",      tier:"medium" },
+  { id:"TENT", name:"帝国娯楽公社",           basePrice:12200, sector:"娯楽",      tier:"medium" }
 ];
 
 const MOOD_META = {
