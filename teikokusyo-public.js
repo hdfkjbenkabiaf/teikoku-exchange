@@ -1,245 +1,141 @@
-// ============================================================
-//  ★ このページは拡張機能なしで誰でも開ける「一般公開ページ」（GitHub Pages等に設置）。
-//    bot.js → background.js（拡張機能） → Firebase Realtime Database、と中継されたデータを
-//    このページがREST APIで定期的に取得(polling)して表示する。
-//    ※ Firebase側のルールで、この合言葉パス配下だけpublicに読めるようにしてある。
-// ============================================================
-const FIREBASE_DB_URL = "https://daitoucha-teikoku-default-rtdb.firebaseio.com";
-const FIREBASE_SECRET = "daitoucha2026x"; // ★ Firebaseの「ルール」タブで設定した合言葉と一致させること
-const FIREBASE_FETCH_URL = FIREBASE_DB_URL + "/stocks/" + FIREBASE_SECRET + ".json";
-const POLL_INTERVAL_MS = 3000; // 3秒ごとにFirebaseへ取りに行く
-
-// 既存のrender系関数をそのまま使い回すため、storageCacheのキー名はこれまでと同じにしておく
-const STOCK_KEY           = "daitoucha_stocks";
-const MARKET_MOOD_KEY     = "daitoucha_market_mood";
-const STOCK_LIST_DIFF_KEY = "daitoucha_stocklist_diff";
-
-// Firebaseから取得した最新データをここにキャッシュしておき、renderAllは同期的に読む
-// 形： { stockData: {...}, mood: {...}, diff: {...}, updatedAt: number }
-let storageCache = {};
-
-// bot.js の BASE_STOCK_LIST と同一内容（銘柄コード・社名・基準株価・業種・企業規模）
-const BASE_STOCK_LIST = [
-  { id:"TREX", name:"大紅茶農園",             basePrice:4800,  sector:"農業",      tier:"small"  },
-  { id:"TPOT", name:"皇帝茶器製造所",         basePrice:11800, sector:"製造",      tier:"medium" },
-  { id:"TMIL", name:"帝国近衛軍需産業",       basePrice:6900,  sector:"軍需",      tier:"small"  },
-  { id:"TMED", name:"紅茶帝国放送局",         basePrice:3400,  sector:"メディア",  tier:"small"  },
-  { id:"TBNK", name:"大紅茶帝国銀行",         basePrice:26400, sector:"金融",      tier:"medium" },
-  { id:"TEXP", name:"帝国海外遺跡探索隊",     basePrice:5900,  sector:"冒険",      tier:"small"  },
-  { id:"TFOD", name:"帝国食糧公社",           basePrice:4100,  sector:"食料",      tier:"small"  },
-  { id:"TBRD", name:"皇帝パン工房",           basePrice:3000,  sector:"食料",      tier:"small"  },
-  { id:"TWNE", name:"帝国醸造所",             basePrice:5500,  sector:"食料",      tier:"small"  },
-  { id:"THSP", name:"帝国総合医療院",         basePrice:22700, sector:"医療",      tier:"medium" },
-  { id:"TPHR", name:"帝国製薬会社",           basePrice:30000, sector:"医療",      tier:"medium" },
-  { id:"TVET", name:"帝国獣医局",             basePrice:7600,  sector:"医療",      tier:"small"  },
-  { id:"TRWY", name:"帝国鉄道公社",           basePrice:10000, sector:"交通",      tier:"medium" },
-  { id:"TSHP", name:"帝国海運会社",           basePrice:6600,  sector:"交通",      tier:"small"  },
-  { id:"TAIR", name:"帝国航空局",             basePrice:19100, sector:"交通",      tier:"medium" },
-  { id:"TTEC", name:"紅茶帝国テック社",       basePrice:45500, sector:"テック",    tier:"large"  },
-  { id:"TNET", name:"帝国通信網",             basePrice:40000, sector:"テック",    tier:"large"  },
-  { id:"TRBT", name:"帝国ロボット研究所",     basePrice:56400, sector:"テック",    tier:"large"  },
-  { id:"TENR", name:"帝国エネルギー公社",     basePrice:43300, sector:"エネルギー",tier:"large"  },
-  { id:"TSOL", name:"帝国太陽光発電所",       basePrice:15500, sector:"エネルギー",tier:"medium" },
-  { id:"TNUC", name:"帝国核融合研究所",       basePrice:67300, sector:"エネルギー",tier:"large"  },
-  { id:"TMIN", name:"紅帝採掘",               basePrice:8000,  sector:"資源",      tier:"small"  },
-  { id:"TINS", name:"紅帝保険",               basePrice:20900, sector:"金融",      tier:"medium" },
-  { id:"TCAF", name:"紅茶カフェチェーン",     basePrice:3700,  sector:"食料",      tier:"small"  },
-  { id:"TFLW", name:"帝国花卉園芸",           basePrice:4400,  sector:"農業",      tier:"small"  },
-  { id:"TTOY", name:"皇帝玩具工房",           basePrice:5100,  sector:"製造",      tier:"small"  },
-  { id:"TPRT", name:"帝国印刷出版社",         basePrice:4600,  sector:"メディア",  tier:"small"  },
-  { id:"TFSH", name:"帝国漁業組合",           basePrice:4900,  sector:"食料",      tier:"small"  },
-  { id:"TSEC", name:"帝国警備保障",           basePrice:13600, sector:"軍需",      tier:"medium" },
-  { id:"TEDU", name:"紅茶帝国教育機構",       basePrice:17300, sector:"メディア",  tier:"medium" },
-  { id:"TAGR", name:"大紅茶アグリビジネス",   basePrice:24500, sector:"農業",      tier:"medium" },
-  { id:"TCHM", name:"帝国化学工業",           basePrice:28200, sector:"製造",      tier:"medium" },
-  { id:"TZAI", name:"紅茶帝国財閥コングロマリット",basePrice:100000,sector:"金融", tier:"large"  },
-  { id:"TGAF", name:"帝国宇宙開発機構",       basePrice:89100, sector:"テック",    tier:"large"  },
-  { id:"TWLD", name:"世界紅茶物流帝国",       basePrice:78200, sector:"交通",      tier:"large"  },
-  { id:"TSBX", name:"茶星バックス",           basePrice:6600,  sector:"食料",      tier:"small"  },
-  { id:"TGOK", name:"緑旭飲料",               basePrice:5400,  sector:"食料",      tier:"small"  },
-  { id:"TMCD", name:"紅ドナルド",             basePrice:19000, sector:"食料",      tier:"medium" },
-  { id:"TNEK", name:"紅猫運輸",               basePrice:15800, sector:"交通",      tier:"medium" },
-  { id:"TKEN", name:"紅東建設",               basePrice:13900, sector:"建設",      tier:"medium" },
-  { id:"TSEI", name:"紅帝製菓",               basePrice:4800,  sector:"食料",      tier:"small"  },
-  { id:"TBKG", name:"バーガー紅王",           basePrice:7200,  sector:"食料",      tier:"small"  },
-  { id:"TSVN", name:"7紅フードフォールディング",basePrice:62400, sector:"流通",     tier:"large"  },
-  { id:"TFMT", name:"家族の紅マート",         basePrice:31700, sector:"流通",      tier:"medium" },
-  { id:"TENT", name:"帝国娯楽公社",           basePrice:12200, sector:"娯楽",      tier:"medium" }
-];
-
-const MOOD_META = {
-  boom:       { name:"好景気",   color:"var(--mood-boom)"   },
-  bubble:     { name:"バブル",   color:"var(--mood-bubble)" },
-  crash:      { name:"暴落",     color:"var(--mood-crash)"  },
-  depression: { name:"世界恐慌", color:"var(--mood-depr)"   }
-};
-
-let activeSector = "全て";
-let prevPriceById = {}; // 直前に「このページで」表示していた価格（flash演出用）
-
-function loadJSON(key, fallback){
-  const v = storageCache[key];
-  return v === undefined || v === null ? fallback : v;
-}
-
-// bot.js側のM&A差分（上場廃止・新会社誕生）を反映した「現在の銘柄一覧」を組み立てる
-function getEffectiveStockList(){
-  const diff = loadJSON(STOCK_LIST_DIFF_KEY, { removed: [], added: [] });
-  const removed = diff.removed || [];
-  const added = diff.added || [];
-  return BASE_STOCK_LIST.filter(s => removed.indexOf(s.id) === -1).concat(added);
-}
-
-function clamp(base, price){ return Math.max(Math.round(base*0.1), Math.min(Math.round(base*5), price)); }
-
-function setMoodBar(mood){
-  const dot = document.getElementById('moodDot');
-  const text = document.getElementById('moodText');
-  const meta = mood && MOOD_META[mood.type];
-  if (!meta){
-    dot.style.background = 'var(--muted)';
-    text.className = 'mood-text';
-    text.textContent = '市況は平常。全銘柄がゆるやかに変動しています。';
-    return;
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>大紅茶帝国証券取引所</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#15100a;
+    --panel:#20180f;
+    --panel2:#291f13;
+    --hairline:#3d2f1c;
+    --gold:#c9a44c;
+    --gold-dim:#8a7038;
+    --cream:#f0e6d2;
+    --muted:#9c8f76;
+    --up:#5aa869;
+    --up-bg:#1c2a1e;
+    --down:#c85a4f;
+    --down-bg:#2c1c19;
+    --mood-boom:#5aa869;
+    --mood-bubble:#c9a44c;
+    --mood-crash:#c85a4f;
+    --mood-depr:#7d3a3a;
+    --warn:#c98a4c;
+    --warn-bg:#2c2313;
   }
-  dot.style.background = meta.color;
-  text.className = 'mood-text active';
-  const phaseLabel = mood.phase === 'cooldown' ? '（収束中）' : '';
-  text.textContent = '【' + meta.name + phaseLabel + '】 市場全体が' + meta.name + 'の影響を受けています。';
-}
-
-function sparkline(hist, up){
-  const w=100,h=32;
-  // データ点が1点しかない場合はフラットな線として2点に複製する
-  const points = hist.length >= 2 ? hist : [hist[0], hist[0]];
-  const min = Math.min(...points), max = Math.max(...points);
-  const range = (max-min) || 1;
-  const pts = points.map((v,i)=>{
-    const x = (i/(points.length-1))*w;
-    const y = h - ((v-min)/range)*h;
-    return x.toFixed(1)+","+y.toFixed(1);
-  }).join(" ");
-  const color = up ? "var(--up)" : "var(--down)";
-  return '<svg class="spark" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"/></svg>';
-}
-
-function buildFilters(stockList){
-  const sectors = ["全て", ...new Set(stockList.map(s=>s.sector))];
-  if (sectors.indexOf(activeSector) === -1) activeSector = "全て";
-  const el = document.getElementById('filters');
-  el.innerHTML = sectors.map(s=>
-    '<button class="filter-btn'+(s===activeSector?' active':'')+'" data-sector="'+s+'">'+s+'</button>'
-  ).join('');
-  el.querySelectorAll('.filter-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      activeSector = btn.dataset.sector;
-      renderAll();
-    });
-  });
-}
-
-function buildDisplayState(stockList, stockData){
-  // bot.js の data[id] = { price, history } をそのまま使う。
-  // 「変動率」は bot.js が直近ティックで押し込んだ history の最後の値（＝直前価格）と比較して算出する。
-  return stockList.map(s=>{
-    const entry = (stockData && stockData[s.id]) ? stockData[s.id] : { price: s.basePrice, history: [] };
-    const price = entry.price != null ? entry.price : s.basePrice;
-    const history = (entry.history || []).concat([price]);
-    const lastTickPrice = (entry.history && entry.history.length) ? entry.history[entry.history.length-1] : price;
-    const up = price >= lastTickPrice;
-    const pctChange = lastTickPrice ? ((price-lastTickPrice)/lastTickPrice*100) : 0;
-    return { stock:s, price, history, up, pctChange };
-  });
-}
-
-function render(rows){
-  const grid = document.getElementById('grid');
-  const list = activeSector==="全て" ? rows : rows.filter(r=>r.stock.sector===activeSector);
-  grid.innerHTML = list.map(r=>{
-    const s = r.stock;
-    const prev = prevPriceById[s.id];
-    const flash = (prev===undefined || prev===r.price) ? '' : (r.price>prev ? ' flash-up' : ' flash-down');
-    return '<div class="card'+flash+'" data-id="'+s.id+'">'+
-      '<div class="card-top">'+
-        '<div><div class="cname">'+s.name+'</div><div class="cid">'+s.id+'</div></div>'+
-        '<div class="sector-tag">'+s.sector+'</div>'+
-      '</div>'+
-      '<div class="price-row">'+
-        '<span class="price">'+r.price.toLocaleString()+'</span>'+
-        '<span class="change '+(r.up?'up':'down')+'">'+(r.up?'▲':'▼')+' '+Math.abs(r.pctChange).toFixed(2)+'%</span>'+
-      '</div>'+
-      sparkline(r.history, r.up)+
-      '<div class="tier-tag">'+({small:"中小企業",medium:"中堅企業",large:"大企業"}[s.tier]||"—")+'</div>'+
-    '</div>';
-  }).join('');
-}
-
-function renderTicker(rows){
-  const track = document.getElementById('tickerTrack');
-  const items = rows.map(r=>{
-    const s = r.stock;
-    return '<span class="tick-item">'+s.id+' <b>'+r.price.toLocaleString()+'</b> <span class="'+(r.up?'up':'down')+'">'+(r.up?'▲':'▼')+Math.abs(r.pctChange).toFixed(2)+'%</span></span>';
-  }).join('');
-  track.innerHTML = items + items;
-}
-
-function renderAll(){
-  const stockList = getEffectiveStockList();
-  const stockData = loadJSON(STOCK_KEY, null);
-  const mood = loadJSON(MARKET_MOOD_KEY, null);
-
-  buildFilters(stockList);
-
-  if (!stockData){
-    document.getElementById('grid').innerHTML =
-      '<div class="card" style="grid-column:1/-1;text-align:center;color:var(--muted);">'+
-      'まだ株価データが届いていません。<br>BOTが起動して最初の価格更新が送信されるまでお待ちください。'+
-      '</div>';
-    document.getElementById('tickerTrack').innerHTML = '';
-    setMoodBar(mood);
-    return;
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--cream);
+    font-family:'Zen Kaku Gothic New',sans-serif;
+    min-height:100vh;
   }
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 60px;}
 
-  const rows = buildDisplayState(stockList, stockData);
-  render(rows);
-  renderTicker(rows);
-  setMoodBar(mood);
+  header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:10px;border-bottom:2px solid var(--gold-dim);padding-bottom:16px;margin-bottom:18px;}
+  .brand{display:flex;align-items:baseline;gap:14px;}
+  h1{font-family:'Shippori Mincho',serif;font-weight:700;font-size:26px;letter-spacing:.06em;margin:0;color:var(--gold);}
+  .sub{font-size:12px;color:var(--muted);letter-spacing:.08em;}
+  .clock{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--muted);}
 
-  const nextPrev = {};
-  rows.forEach(r => { nextPrev[r.stock.id] = r.price; });
-  prevPriceById = nextPrev;
-}
-
-// Firebaseから最新データを取得してstorageCacheへ反映し、再描画する。
-// リアルタイムDBのWebSocket購読は使わず、シンプルなREST pollingにしている
-// （公開ページなので依存を減らし、GitHub Pagesにそのまま置けるようにするため）。
-let lastUpdatedAt = null;
-async function pollLoop(){
-  try {
-    const res = await fetch(FIREBASE_FETCH_URL, { cache: "no-store" });
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!data) { storageCache = {}; renderAll(); return; }
-    // 前回取得時と更新日時が変わっていなければ再描画をスキップ（無駄な描画を避ける）
-    if (data.updatedAt && data.updatedAt === lastUpdatedAt) return;
-    lastUpdatedAt = data.updatedAt || null;
-    storageCache = {
-      [STOCK_KEY]: data.stockData || null,
-      [MARKET_MOOD_KEY]: data.mood || null,
-      [STOCK_LIST_DIFF_KEY]: data.diff || { removed: [], added: [] }
-    };
-    renderAll();
-  } catch(e) {
-    console.warn('[teikokusyo-public] Firebase取得エラー:', e);
+  .mood-bar{
+    display:flex;align-items:center;gap:10px;
+    background:var(--panel);border:1px solid var(--hairline);border-radius:6px;
+    padding:9px 14px;margin-bottom:10px;
   }
-}
+  .mood-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:var(--muted);}
+  .mood-text{font-size:13px;color:var(--muted);flex:1;}
+  .mood-text.active{color:var(--cream);}
 
-function updateClock(){
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString('ja-JP');
-}
+  .status-bar{
+    display:flex;align-items:center;gap:10px;
+    font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);
+    padding:2px 4px;margin-bottom:16px;
+  }
+  .status-bar.warn{color:var(--warn);}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--up);flex-shrink:0;}
+  .status-bar.warn .status-dot{background:var(--warn);animation:pulse 1.2s ease-in-out infinite;}
+  .status-bar.error .status-dot{background:var(--down);}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 
-// 初回ロード
-pollLoop();
-updateClock();
-setInterval(updateClock, 1000);
-setInterval(pollLoop, POLL_INTERVAL_MS);
+  .ticker-strip{
+    overflow:hidden;white-space:nowrap;
+    background:linear-gradient(180deg,#2a1f10,#20180f);
+    border:1px solid var(--gold-dim);border-radius:6px;
+    padding:9px 0;margin-bottom:22px;
+  }
+  .ticker-track{display:inline-flex;gap:26px;padding-left:100%;animation:scroll 46s linear infinite;}
+  @keyframes scroll{from{transform:translateX(0);}to{transform:translateX(-100%);}}
+  .tick-item{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);display:inline-flex;gap:6px;}
+  .tick-item b{color:var(--cream);font-weight:500;}
+  .tick-item .up{color:var(--up);}
+  .tick-item .down{color:var(--down);}
+
+  .filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;}
+  .filter-btn{
+    font-family:'Zen Kaku Gothic New',sans-serif;font-size:12px;color:var(--muted);
+    background:var(--panel);border:1px solid var(--hairline);border-radius:20px;
+    padding:5px 13px;cursor:pointer;transition:.15s;
+  }
+  .filter-btn:hover{border-color:var(--gold-dim);color:var(--cream);}
+  .filter-btn.active{background:var(--gold);border-color:var(--gold);color:#1a1408;font-weight:500;}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;}
+  .card{
+    background:var(--panel);border:1px solid var(--hairline);border-radius:10px;
+    padding:14px 16px;transition:background .5s ease;
+  }
+  .card.flash-up{background:var(--up-bg);}
+  .card.flash-down{background:var(--down-bg);}
+  .card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
+  .cname{font-size:14px;font-weight:500;color:var(--cream);line-height:1.3;}
+  .cid{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);}
+  .sector-tag{font-size:10px;color:var(--gold-dim);border:1px solid var(--hairline);border-radius:3px;padding:2px 6px;white-space:nowrap;}
+  .price-row{display:flex;align-items:baseline;gap:10px;margin-bottom:8px;}
+  .price{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--cream);}
+  .change{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:500;}
+  .change.up{color:var(--up);}
+  .change.down{color:var(--down);}
+  .spark{display:block;width:100%;height:32px;}
+  .tier-tag{font-size:10px;color:var(--muted);margin-top:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>大紅茶帝国証券取引所</h1>
+      <span class="sub">TEIKOKU EXCHANGE — PUBLIC LIVE（Firebase連携）</span>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+  </header>
+
+  <div class="mood-bar">
+    <div class="mood-dot" id="moodDot"></div>
+    <div class="mood-text" id="moodText">市況は平常。全銘柄がゆるやかに変動しています。</div>
+  </div>
+
+  <div class="status-bar" id="statusBar">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">接続中…</span>
+  </div>
+
+  <div class="ticker-strip">
+    <div class="ticker-track" id="tickerTrack"></div>
+  </div>
+
+  <div class="filters" id="filters"></div>
+
+  <div class="grid" id="grid"></div>
+
+</div>
+
+<script src="teikokusyo-public.js"></script>
+</body>
+</html>
