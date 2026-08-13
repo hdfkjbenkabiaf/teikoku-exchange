@@ -24,6 +24,8 @@
     --mood-bubble:#c9a44c;
     --mood-crash:#c85a4f;
     --mood-depr:#7d3a3a;
+    --warn:#c98a4c;
+    --warn-bg:#2c2313;
   }
   *{box-sizing:border-box;}
   body{
@@ -44,11 +46,22 @@
   .mood-bar{
     display:flex;align-items:center;gap:10px;
     background:var(--panel);border:1px solid var(--hairline);border-radius:6px;
-    padding:9px 14px;margin-bottom:16px;
+    padding:9px 14px;margin-bottom:10px;
   }
   .mood-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:var(--muted);}
   .mood-text{font-size:13px;color:var(--muted);flex:1;}
   .mood-text.active{color:var(--cream);}
+
+  .status-bar{
+    display:flex;align-items:center;gap:10px;
+    font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);
+    padding:2px 4px;margin-bottom:16px;
+  }
+  .status-bar.warn{color:var(--warn);}
+  .status-dot{width:7px;height:7px;border-radius:50%;background:var(--up);flex-shrink:0;}
+  .status-bar.warn .status-dot{background:var(--warn);animation:pulse 1.2s ease-in-out infinite;}
+  .status-bar.error .status-dot{background:var(--down);}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 
   .ticker-strip{
     overflow:hidden;white-space:nowrap;
@@ -106,6 +119,11 @@
   <div class="mood-bar">
     <div class="mood-dot" id="moodDot"></div>
     <div class="mood-text" id="moodText">市況は平常。全銘柄がゆるやかに変動しています。</div>
+  </div>
+
+  <div class="status-bar" id="statusBar">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">接続中…</span>
   </div>
 
   <div class="ticker-strip">
